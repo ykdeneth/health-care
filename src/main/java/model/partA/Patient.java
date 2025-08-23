@@ -1,4 +1,3 @@
-
 package model.partA;
 
 import jakarta.persistence.Column;
@@ -14,15 +13,14 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-
 /**
  *
  * @author Deneth
  */
 @Entity
 @Table(name = "patients")
-public class Patient implements Serializable{
-    
+public class Patient implements Serializable {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
@@ -39,24 +37,77 @@ public class Patient implements Serializable{
     private List<String[]> treatmentPlans = new ArrayList<>();
 
     // Getters and setters for all fields...
-    public int getId(){ return id; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    public Date getDOB() { return dob; }
-    public void setDOB(Date dob) { this.dob = dob; }
-    public String getGender() { return gender; }
-    public void setGender(String gender) { this.gender = gender; }
-    public String getBloodGroup() { return bloodGroup; }
-    public void setBloodGroup(String bloodGroup) { this.bloodGroup = bloodGroup; }
-    public String getContact() { return contact; }
-    public void setContact(String contact) { this.contact = contact; }
-    public String getAddress(){return address;}
-    public void setAddress(String address){this.address = address;}
-    public List<String[]> getMedicalHistory() { return medicalHistory; }
-    public void setMedicalHistory(List<String[]> medicalHistory) { this.medicalHistory = medicalHistory; }
-    public List<String[]> getTreatmentPlans() { return treatmentPlans; }
-    public void setTreatmentPlans(List<String[]> treatmentPlans) { this.treatmentPlans = treatmentPlans; }
+    public int getId() {
+        return id;
+    }
+    public void setId(int id){
+        this.id = id;
+    }
+    public String getName() {
+        return name;
+    }
 
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Date getDOB() {
+        return dob;
+    }
+
+    public void setDOB(Date dob) {
+        this.dob = dob;
+    }
+
+    public String getGender() {
+        return gender;
+    }
+
+    public void setGender(String gender) {
+        this.gender = gender;
+    }
+
+    public String getBloodGroup() {
+        return bloodGroup;
+    }
+
+    public void setBloodGroup(String bloodGroup) {
+        this.bloodGroup = bloodGroup;
+    }
+
+    public String getContact() {
+        return contact;
+    }
+
+    public void setContact(String contact) {
+        this.contact = contact;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public List<String[]> getMedicalHistory() {
+        return medicalHistory;
+    }
+
+    public void setMedicalHistory(List<String[]> medicalHistory) {
+        this.medicalHistory = medicalHistory;
+    }
+
+    public List<String[]> getTreatmentPlans() {
+        return treatmentPlans;
+    }
+
+    public void setTreatmentPlans(List<String[]> treatmentPlans) {
+        this.treatmentPlans = treatmentPlans;
+    }
+
+    
     public PatientMemento saveToMemento() {
         // Defensive copy of mutable lists before saving
         List<String[]> medHistCopy = new ArrayList<>(medicalHistory);

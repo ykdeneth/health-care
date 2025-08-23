@@ -35,6 +35,10 @@ import java.time.ZoneId;
 import java.util.Calendar;
 import java.util.Date;
 import javax.swing.UIManager;
+import model.partD.AccessControlChainBuilder;
+import model.partD.AccessRequest;
+import model.partD.Permission;
+import model.partD.RoleHandler;
 
 /**
  *
@@ -49,6 +53,8 @@ public class HealthcareManagementSystemGUI extends JFrame {
     private final model.partA.Patient currentPatient2 = new model.partA.Patient();
     DefaultTableModel historyTable;
     DefaultTableModel treatmentTable;
+    int id = 1;
+    private final Map<String, String> assignedRoles = new HashMap<>();
 
     public HealthcareManagementSystemGUI() {
         setTitle("Healthcare Management System");
@@ -201,6 +207,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
 
         btnRegister.addActionListener(e -> {
             try {
+                int b = id++;
                 // 1. Collect values from GUI
                 String name = txtName.getText();
                 Date dob = (Date) dateSpinner.getValue();   // directly a Date
@@ -211,6 +218,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
 
                 // 2. Create Patient entity
                 Patient patient = new Patient();
+                patient.setId(b);
                 patient.setName(name);
                 patient.setDOB(dob);
                 patient.setGender(gender);
@@ -219,14 +227,13 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 patient.setAddress(address);
 
                 // 3. Persist using Hibernate
-                org.hibernate.Session session = util.HibernateUtil.getSessionFactory().openSession();
-                session.beginTransaction();
-
-                session.persist(patient);
-
-                session.getTransaction().commit();
-                session.close();
-
+//                org.hibernate.Session session = util.HibernateUtil.getSessionFactory().openSession();
+//                session.beginTransaction();
+//
+//                session.persist(patient);
+//
+//                session.getTransaction().commit();
+//                session.close();
                 String key = String.valueOf(patient.getId());
                 model.partA.PatientMemento snapshot = patient.saveToMemento();
                 caretaker.saveState(key, snapshot);
@@ -1020,9 +1027,15 @@ public class HealthcareManagementSystemGUI extends JFrame {
         Object[][] data = {
             {"View Records", true, true, true, true},
             {"Edit Records", true, true, false, true},
-            {"Approve Claims", true, false, false, true},
-            {"Generate Reports", true, true, true, true}
-        };
+            {"Reports", true, true, false, true},
+            {"Register Patient", true, true, true, true},
+            {"Treatement and Medical Notes", true, true, true, true},
+            {"Make Appointment", true, true, true, true},
+            {"Roles and Permissions", true, true, true, true},
+            {"Billing and prescriptions", true, true, true, true},
+            {"Staff Registration", true, true, true, true},
+            {"Staff Schedule", true, true, true, true},
+            {"Medicine Stock Management", true, true, true, true},};
         JTable permissionTable = new JTable(data, columns) {
             public Class getColumnClass(int column) {
                 return (column == 0) ? String.class : Boolean.class;
@@ -1031,6 +1044,43 @@ public class HealthcareManagementSystemGUI extends JFrame {
         JScrollPane scrollPane = new JScrollPane(permissionTable);
         scrollPane.setBounds(20, 70, 790, 350);
         panel.add(scrollPane);
+
+        JButton btnTestPermission = new JButton("Save Selected Action");
+        btnTestPermission.setBounds(20, 430, 200, 30);
+        panel.add(btnTestPermission);
+
+        btnAssign.addActionListener(e -> {
+            String user = (String) cbUser.getSelectedItem();
+            String role = (String) cbRole.getSelectedItem();
+            if (user == null || role == null) {
+                JOptionPane.showMessageDialog(panel, "Please select user and role.", "Info", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            assignedRoles.put(user, role);
+            JOptionPane.showMessageDialog(panel, "Assigned role '" + role + "' to user '" + user + "'.");
+        });
+        btnTestPermission.addActionListener(e -> {
+            int row = permissionTable.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(panel, "Please select an action row in the table.");
+                return;
+            }
+
+            String actionName = permissionTable.getValueAt(row, 0).toString(); // first column is action string
+            Permission permission = mapActionToPermission(actionName);
+            if (permission == null) {
+                JOptionPane.showMessageDialog(panel, "This action is not mapped to a permission in code.");
+                return;
+            }
+
+            String user = (String) cbUser.getSelectedItem();
+            // If you want to use the assigned role, prefer that; otherwise use current selection from cbRole.
+            String role = assignedRoles.getOrDefault(user, (String) cbRole.getSelectedItem());
+
+            boolean allowed = isAllowedByChain(user, role, permission);
+            JOptionPane.showMessageDialog(panel,
+                    (allowed ? "ALLOWED" : "DENIED") + " for user=" + user + ", role=" + role + ", action=" + actionName);
+        });
     }
 
     private void createReportGenerationPanel(JPanel panel) {
@@ -1178,6 +1228,51 @@ public class HealthcareManagementSystemGUI extends JFrame {
 //            panel.setVisible(true);
         ///////////////////////////////////////////////////////////
 
+    }
+
+    private Permission mapActionToPermission(String actionName) {
+        switch (actionName) {
+            case "View Records":
+                return Permission.VIEW_RECORDS;
+            case "Edit Records":
+                return Permission.EDIT_RECORDS;
+            case "Reports":
+                return Permission.GENERATE_REPORTS;
+            case "Register Patient":
+                return Permission.REGISTER_PATIENT;
+            case "Treatement and Medical Notes":
+                return Permission.TREATMENTS_AND_MEDICAL_NOTES;
+            case "Make Appointment":
+                return Permission.MAKE_APPOINTMENT;
+            case "Roles and Permissions":
+                return Permission.ROLES_AND_PERMISSIONS;
+            case "Billing and prescriptions":
+                return Permission.BILLING_AND_PRESCRIPTION;
+            case "Staff Registration":
+                return Permission.STAFF_REGISTER;
+            case "Staff Schedule":
+                return Permission.STAFF_SCHEDULE;
+            case "Medicine Stock Management":
+                return Permission.MEDICINE_STOCKE_MANAGEMENT;
+
+            // example mapping
+            // Add mappings as needed for your actions, or create more enum values if you want finer control.
+            default:
+                return null; // Unknown/unsupported action
+        }
+    }
+
+    private boolean isAllowedByChain(String userId, String selectedRole, Permission permission) {
+        // Build chain in escalation order. If your policy is single-role only, just pass List.of(selectedRole).
+        java.util.List<String> roles = java.util.Arrays.asList(selectedRole, "Admin"); // Admin at end as fallback, optional per your policy.
+        RoleHandler chain = AccessControlChainBuilder.buildChain(roles);
+
+        if (permission == null || chain == null) {
+            return false;
+        }
+
+        AccessRequest req = new AccessRequest(userId, selectedRole, permission);
+        return chain.handle(req);
     }
 
     /**

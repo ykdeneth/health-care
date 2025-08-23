@@ -1,0 +1,22 @@
+
+package model.partD;
+
+/**
+ *
+ * @author Deneth
+ */
+public enum Permission {
+    VIEW_RECORDS,
+    EDIT_RECORDS,
+    GENERATE_REPORTS,
+    REGISTER_PATIENT,
+    TREATMENTS_AND_MEDICAL_NOTES,
+    MAKE_APPOINTMENT,
+    BILLING_AND_PRESCRIPTION,
+    ROLES_AND_PERMISSIONS,
+    STAFF_REGISTER,
+    STAFF_SCHEDULE,
+    MEDICINE_STOCKE_MANAGEMENT
+    
+    
+}

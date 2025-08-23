@@ -9,5 +9,6 @@ package gui;
  * @author Deneth
  */
 public class NewClass {
-    
+   
+
 }
