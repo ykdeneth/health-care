@@ -5,21 +5,23 @@
 package model.partD;
 
 import java.util.EnumSet;
+import model.partD.staff.PermissionMatrix;
 
 /**
  *
  * @author Deneth
  */
 public class DoctorHandler extends RoleHandler {
-    private static final EnumSet<Permission> ALLOWED = EnumSet.of(
-            Permission.VIEW_RECORDS,
-            Permission.EDIT_RECORDS,
-            Permission.GENERATE_REPORTS
-    );
+//    private static final EnumSet<Permission> ALLOWED = EnumSet.of(
+//            Permission.VIEW_RECORDS,
+//            Permission.EDIT_RECORDS,
+//            Permission.GENERATE_REPORTS
+//    );
 
     @Override
     protected boolean canHandle(AccessRequest request) {
         if (!"Doctor".equalsIgnoreCase(request.getRole())) return false;
-        return ALLOWED.contains(request.getPermission());
+//        return ALLOWED.contains(request.getPermission());
+        return PermissionMatrix.getPermissionsForRole("Doctor").contains(request.getPermission());
     }
 }

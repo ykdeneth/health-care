@@ -4,7 +4,6 @@
  */
 package gui;
 
-
 import com.formdev.flatlaf.FlatLightLaf;
 import java.awt.Color;
 import java.io.InputStream;
@@ -17,6 +16,9 @@ import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import model.partD.staff.AuthService;
+import model.partD.staff.SessionManager;
+import model.partD.staff.StaffRegistry;
 
 /**
  *
@@ -24,11 +26,103 @@ import javax.swing.UIManager;
  */
 public class LoginPage extends javax.swing.JFrame {
 
-    /**
-     * Creates new form LoginPage
-     */
+    private final StaffRegistry staffRegistry = new StaffRegistry();
+    private final SessionManager sessionManager = new SessionManager();
+    private final AuthService authService = new AuthService(staffRegistry, sessionManager);
+    JTextField txtUser;
+    JPasswordField txtPass;
+
     public LoginPage() {
-        initComponents();
+        JFrame frame = new JFrame("Login Page");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(400, 250);
+        frame.setLayout(null);
+
+        // Panel (optional, for grouping)
+        JPanel panel = new JPanel();
+        panel.setLayout(null);
+        panel.setBounds(0, 0, 400, 250);
+        frame.add(panel);
+
+        // Username Label + Field
+        JLabel lblUser = new JLabel("Username:");
+        lblUser.setBounds(50, 50, 100, 25);
+        panel.add(lblUser);
+
+        txtUser = new JTextField();
+        txtUser.setBounds(150, 50, 180, 25);
+        panel.add(txtUser);
+
+        // Password Label + Field
+        JLabel lblPass = new JLabel("Password:");
+        lblPass.setBounds(50, 90, 100, 25);
+        panel.add(lblPass);
+
+        txtPass = new JPasswordField();
+        txtPass.setBounds(150, 90, 180, 25);
+        panel.add(txtPass);
+
+        // Login Button
+        JButton btnLogin = new JButton("Login");
+        btnLogin.setBounds(150, 130, 80, 30);
+        panel.add(btnLogin);
+
+        // Clear Button
+        JButton btnClear = new JButton("Clear");
+        btnClear.setBounds(250, 130, 80, 30);
+        panel.add(btnClear);
+
+        // Result Label
+        JLabel lblResult = new JLabel("");
+        lblResult.setBounds(50, 170, 300, 25);
+        lblResult.setForeground(Color.RED);
+        panel.add(lblResult);
+
+        // Login Button Action
+        btnLogin.addActionListener(e -> {
+//                            showLoginDialog();
+
+//            Object[] message = {
+//                "User ID:", txtUser.getText(),
+//                "Password:", txtPass.getPassword()
+//            };
+//
+//            int option = JOptionPane.showConfirmDialog(this, message, "Login", JOptionPane.OK_CANCEL_OPTION);
+//            if (option == JOptionPane.OK_OPTION) {
+            String user = txtUser.getText().trim();
+            String pass = new String(txtPass.getPassword());
+
+            boolean ok = authService.login(user, pass);
+            if (!ok) {
+                JOptionPane.showMessageDialog(this, "Invalid credentials.");
+                // try again
+            } else {
+                JOptionPane.showMessageDialog(this, "Welcome, " + authService.getCurrentUserId() + " (" + authService.getCurrentRole() + ")");
+                System.out.println(sessionManager.isLoggedIn());
+                System.out.println(sessionManager.currentRole());
+                System.out.println(sessionManager.currentUserId());
+                // Optionally enable tabs based on role, or just keep permission checks on actions
+                HealthcareManagementSystemGUI h = new HealthcareManagementSystemGUI();
+                h.setVisible(true);
+                this.dispose();
+                System.out.println(sessionManager.isLoggedIn());
+                System.out.println(sessionManager.currentRole());
+                System.out.println(sessionManager.currentUserId());
+            }
+
+            frame.dispose();
+            // Example validation (replace with DB check)
+        });
+
+        // Clear Button Action
+        btnClear.addActionListener(e -> {
+            txtUser.setText("");
+            txtPass.setText("");
+            lblResult.setText("");
+        });
+
+        frame.setLocationRelativeTo(null); // center screen
+        frame.setVisible(true);
     }
 
     /**
@@ -82,6 +176,8 @@ public class LoginPage extends javax.swing.JFrame {
             java.util.logging.Logger.getLogger(LoginPage.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
         }
         //</editor-fold>
+        // At top-level of GUI class
+
 
         /* Create and display the form */
         try {
@@ -90,86 +186,17 @@ public class LoginPage extends javax.swing.JFrame {
 
             // Or set Dark theme
             // UIManager.setLookAndFeel(new FlatDarkLaf());
-
         } catch (Exception ex) {
             System.err.println("Failed to initialize LaF: " + ex);
         }
 
-         SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame("Login Page");
-            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.setSize(400, 250);
-            frame.setLayout(null);
+        SwingUtilities.invokeLater(
+                () -> {
 
-            // Panel (optional, for grouping)
-            JPanel panel = new JPanel();
-            panel.setLayout(null);
-            panel.setBounds(0, 0, 400, 250);
-            frame.add(panel);
-
-            // Username Label + Field
-            JLabel lblUser = new JLabel("Username:");
-            lblUser.setBounds(50, 50, 100, 25);
-            panel.add(lblUser);
-
-            JTextField txtUser = new JTextField();
-            txtUser.setBounds(150, 50, 180, 25);
-            panel.add(txtUser);
-
-            // Password Label + Field
-            JLabel lblPass = new JLabel("Password:");
-            lblPass.setBounds(50, 90, 100, 25);
-            panel.add(lblPass);
-
-            JPasswordField txtPass = new JPasswordField();
-            txtPass.setBounds(150, 90, 180, 25);
-            panel.add(txtPass);
-
-            // Login Button
-            JButton btnLogin = new JButton("Login");
-            btnLogin.setBounds(150, 130, 80, 30);
-            panel.add(btnLogin);
-
-            // Clear Button
-            JButton btnClear = new JButton("Clear");
-            btnClear.setBounds(250, 130, 80, 30);
-            panel.add(btnClear);
-
-            // Result Label
-            JLabel lblResult = new JLabel("");
-            lblResult.setBounds(50, 170, 300, 25);
-            lblResult.setForeground(Color.RED);
-            panel.add(lblResult);
-
-            // Login Button Action
-            btnLogin.addActionListener(e -> {
-                String username = txtUser.getText();
-                String password = new String(txtPass.getPassword());
-
-                // Example validation (replace with DB check)
-                if (username.equals("admin") && password.equals("1234")) {
-                    lblResult.setForeground(Color.GREEN);
-                    lblResult.setText("Login Successful!");
-                    HealthcareManagementSystemGUI hm = new HealthcareManagementSystemGUI();
-                    hm.setVisible(true);
-                    frame.dispose();
-                    JOptionPane.showMessageDialog(frame, "Welcome " + username, "Success", JOptionPane.INFORMATION_MESSAGE);
-                } else {
-                    lblResult.setForeground(Color.RED);
-                    lblResult.setText("Invalid Username or Password!");
+                    LoginPage frame = new LoginPage();
+                    frame.setVisible(true);
                 }
-            });
-
-            // Clear Button Action
-            btnClear.addActionListener(e -> {
-                txtUser.setText("");
-                txtPass.setText("");
-                lblResult.setText("");
-            });
-
-            frame.setLocationRelativeTo(null); // center screen
-            frame.setVisible(true);
-        });
+        );
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables

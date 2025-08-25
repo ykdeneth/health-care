@@ -4,6 +4,7 @@
  */
 package model.partD;
 import java.util.EnumSet;
+import model.partD.staff.PermissionMatrix;
 /**
  *
  * @author Deneth
@@ -11,14 +12,14 @@ import java.util.EnumSet;
 
 
 public class PharmacistHandler extends RoleHandler {
-    private static final EnumSet<Permission> ALLOWED = EnumSet.of(
-            Permission.VIEW_RECORDS
-            // Optionally add medication-dispense actions if modeled as permissions
-    );
+//    private static final EnumSet<Permission> ALLOWED = EnumSet.of(
+//            Permission.VIEW_RECORDS
+//            // Optionally add medication-dispense actions if modeled as permissions
+//    );
 
     @Override
     protected boolean canHandle(AccessRequest request) {
         if (!"Pharmacist".equalsIgnoreCase(request.getRole())) return false;
-        return ALLOWED.contains(request.getPermission());
+       return PermissionMatrix.getPermissionsForRole("Pharmacist").contains(request.getPermission());
     }
 }

@@ -6,7 +6,12 @@ import java.awt.BorderLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.geom.FlatteningPathIterator;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,13 +37,34 @@ import model.partA.PatientMemento;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
+import javax.swing.JPasswordField;
 import javax.swing.UIManager;
+import model.partB.Appointment;
+import model.partB.AppointmentMediator;
+import model.partB.StaffSchedule;
 import model.partD.AccessControlChainBuilder;
 import model.partD.AccessRequest;
 import model.partD.Permission;
 import model.partD.RoleHandler;
+import model.partD.staff.AuthService;
+import model.partD.staff.PermissionMatrix;
+import model.partD.staff.SessionManager;
+import model.partD.staff.StaffRegistry;
+import model.partF.DataService;
+import model.partF.EncryptionDecorator;
+import model.partF.LoggingDecorator;
+import model.partF.PatientDataService;
+import model.partF.chainOfRes.AuthHandler;
+import model.partF.chainOfRes.AuthorizationHandler;
+import model.partF.chainOfRes.Handler;
+import model.partF.chainOfRes.LoggingHandler;
+import model.partF.chainOfRes.Request;
 
 /**
  *
@@ -55,8 +81,23 @@ public class HealthcareManagementSystemGUI extends JFrame {
     DefaultTableModel treatmentTable;
     int id = 1;
     private final Map<String, String> assignedRoles = new HashMap<>();
+    private final StaffRegistry staffRegistry = new StaffRegistry();
+    private final SessionManager sessionManager = new SessionManager();
+    private final AuthService authService = new AuthService(staffRegistry, sessionManager);
+    JComboBox<String> cbUserIDs;
+    JComboBox<String> cbRolell;
+    JComboBox<String> cbUserss;
+    JComboBox<String> cbDoctor;
+    private final AppointmentMediator mediator = new AppointmentMediator();
+    Map<String, String[]> usersByRolell;
+    private DataService patientDataService;
+    private Handler securityChain;
 
     public HealthcareManagementSystemGUI() {
+        initializeDataServices();
+        initializeSecurityChain();
+        showLoginDialog();
+
         setTitle("Healthcare Management System");
         setSize(1000, 700);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -103,9 +144,31 @@ public class HealthcareManagementSystemGUI extends JFrame {
         createMedicineStockManagement(inventoryPanel);
         tabbedPane.addTab("Medicine Stock Management", inventoryPanel);
 
+        JPanel signoutPanel = new JPanel(null);
+        signOutPanel(signoutPanel);
+        tabbedPane.addTab("Sign Out", signoutPanel);
+
         add(tabbedPane);
         currentPatient = new Patient();
         caretaker = new PatientCaretaker();
+
+    }
+
+    private void initializeDataServices() {
+        DataService baseService = new PatientDataService();
+        baseService = new EncryptionDecorator(baseService);
+        baseService = new LoggingDecorator(baseService);
+
+        this.patientDataService = baseService;
+    }
+
+    private void initializeSecurityChain() {
+        Handler auth = new AuthHandler();
+        Handler authorize = new AuthorizationHandler();
+        Handler log = new LoggingHandler();
+
+        auth.setNext(authorize).setNext(log);
+        this.securityChain = auth;
     }
 
     private void createPatientRecordPanel(JPanel panel) {
@@ -206,6 +269,25 @@ public class HealthcareManagementSystemGUI extends JFrame {
         panel.add(btnClear);
 
         btnRegister.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.REGISTER_PATIENT);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to register patients.");
+                return;
+            }
+
+            // Create security Request object using user token and resource
+            String token = userIds;  // or any unique user session token
+            Request req = new Request(token, "PatientRecordAccess");
+
+            // Run through CoR chain to authenticate & authorize
+            if (!securityChain.handle(req)) {
+                JOptionPane.showMessageDialog(panel, "Access denied by security chain.");
+                return;
+            }
+
             try {
                 int b = id++;
                 // 1. Collect values from GUI
@@ -238,6 +320,12 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 model.partA.PatientMemento snapshot = patient.saveToMemento();
                 caretaker.saveState(key, snapshot);
 
+                // Serialize patient object to byte[] (you need to implement serialization)
+                byte[] dataToSave = serializePatient(patient);
+
+                // Save data securely using decorator wrapped service
+                patientDataService.saveData(dataToSave);
+
                 JOptionPane.showMessageDialog(panel, "Patient Registered Successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
 
             } catch (Exception ex) {
@@ -255,41 +343,49 @@ public class HealthcareManagementSystemGUI extends JFrame {
         });
     }
 
+    private byte[] serializePatient(Patient patient) throws IOException {
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream(); ObjectOutputStream oos = new ObjectOutputStream(bos)) {
+            oos.writeObject(patient);
+            oos.flush();
+            return bos.toByteArray();
+        }
+    }
+
+    private Patient deserializePatient(byte[] data) throws IOException, ClassNotFoundException {
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(data); ObjectInputStream ois = new ObjectInputStream(bis)) {
+            return (Patient) ois.readObject();
+        }
+    }
+
     private void createStaffRegistrationForm(JPanel panel) {
-        JLabel lblName = new JLabel("Full Name:");
-        lblName.setBounds(20, 20, 100, 25);
-        panel.add(lblName);
-        JTextField txtName = new JTextField();
-        txtName.setBounds(130, 20, 200, 25);
-        panel.add(txtName);
+        JLabel lblId = new JLabel("User Id:");
+        lblId.setBounds(20, 20, 100, 25);
+        panel.add(lblId);
+        JTextField txtId = new JTextField();
+        txtId.setBounds(130, 20, 200, 25);
+        panel.add(txtId);
 
-        JLabel lblDOB = new JLabel("Date of Birth:");
-        lblDOB.setBounds(20, 60, 100, 25);
-        panel.add(lblDOB);
-        JTextField txtDOB = new JTextField();
-        txtDOB.setBounds(130, 60, 150, 25);
-        panel.add(txtDOB);
+        JLabel lblPass = new JLabel("Password:");
+        lblPass.setBounds(20, 60, 100, 25);
+        panel.add(lblPass);
 
-        JLabel lblGender = new JLabel("Gender:");
-        lblGender.setBounds(20, 100, 100, 25);
-        panel.add(lblGender);
-        JComboBox<String> cbGender = new JComboBox<>(new String[]{"Male", "Female", "Other"});
-        cbGender.setBounds(130, 100, 120, 25);
-        panel.add(cbGender);
+        JPasswordField txtPass = new JPasswordField();
+        txtPass.setBounds(130, 60, 180, 25);
+        panel.add(txtPass);
 
         JLabel lblBlood = new JLabel("Role:");
-        lblBlood.setBounds(20, 140, 100, 25);
+        lblBlood.setBounds(20, 100, 100, 25);
         panel.add(lblBlood);
-        JComboBox<String> cbBloodGroup = new JComboBox<>(new String[]{"Doctor", "Nurse", "Pharmacist", "Admin"});
-        cbBloodGroup.setBounds(130, 140, 120, 25);
-        panel.add(cbBloodGroup);
+        JComboBox<String> cbNewRole = new JComboBox<>(new String[]{"Doctor", "Nurse", "Pharmacist", "Admin"});
+        cbNewRole.setBounds(130, 100, 120, 25);
+        panel.add(cbNewRole);
 
-        JLabel lblContact = new JLabel("Contact Number:");
-        lblContact.setBounds(20, 180, 120, 25);
-        panel.add(lblContact);
-        JTextField txtContact = new JTextField();
-        txtContact.setBounds(150, 180, 180, 25);
-        panel.add(txtContact);
+        JLabel lblName = new JLabel("Name:");
+        lblName.setBounds(20, 140, 100, 25);
+        panel.add(lblName);
+        JTextField txtName = new JTextField();
+        txtName.setBounds(130, 140, 200, 25);
+        panel.add(txtName);
 
         JButton btnRegister = new JButton("Register");
         btnRegister.setBounds(130, 220, 100, 30);
@@ -298,18 +394,54 @@ public class HealthcareManagementSystemGUI extends JFrame {
         JButton btnClear = new JButton("Clear");
         btnClear.setBounds(250, 220, 100, 30);
         panel.add(btnClear);
-
+        System.out.println(sessionManager.isLoggedIn());
+        System.out.println(sessionManager.currentRole());
+        System.out.println(sessionManager.currentUserId());
         btnRegister.addActionListener(e -> {
             // Add patient registration logic here or validate input
-            JOptionPane.showMessageDialog(panel, "Patient Registered Successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.STAFF_REGISTER);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to register staff.");
+                return;
+            }
+
+            String uid = txtId.getText().trim();
+            String name = txtName.getText().trim();
+            String role = (String) cbNewRole.getSelectedItem();
+            String pwd = new String(txtPass.getPassword());
+
+            boolean success = authService.registerStaff(uid, role, pwd);
+            if (success) {
+                JOptionPane.showMessageDialog(this, "Registered " + uid + " as " + role);
+                Set<String> allUserIds = staffRegistry.snapshot().keySet();
+                cbUserIDs.removeAllItems();
+                for (String userId : allUserIds) {
+                    cbUserIDs.addItem(userId);
+                }
+                cbUserss.removeAllItems();
+                for (String userId : allUserIds) {
+                    cbUserss.addItem(userId);
+                }
+                cbDoctor.removeAllItems();
+                for (String userId : allUserIds) {
+                    cbDoctor.addItem(userId);
+                }
+
+            } else {
+                JOptionPane.showMessageDialog(this, "Registration failed (user exists or not authorized).");
+            }
         });
 
         btnClear.addActionListener(e -> {
             txtName.setText("");
-            txtDOB.setText("");
-            cbGender.setSelectedIndex(0);
-            cbBloodGroup.setSelectedIndex(0);
-            txtContact.setText("");
+            txtId.setText("");
+            cbNewRole.setSelectedIndex(0);
+//            cbBloodGroup.setSelectedIndex(0);
+            txtPass.setText("");
         });
     }
 
@@ -379,6 +511,14 @@ public class HealthcareManagementSystemGUI extends JFrame {
 
         // --- Add Button Action ---
         btnRegister.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.MEDICINE_STOCKE_MANAGEMENT);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to manage medicine stock management.");
+                return;
+            }
             String name = txtName.getText().trim();
             String qty = txtQY.getText().trim();
             String price = txtPU.getText().trim();
@@ -509,16 +649,21 @@ public class HealthcareManagementSystemGUI extends JFrame {
         JButton btnSave = new JButton("Save");
         btnSave.setBounds(130, 310, 100, 30);
         panel.add(btnSave);
-
-        JButton btnEdit = new JButton("Edit");
-        btnEdit.setBounds(250, 310, 100, 30);
-        panel.add(btnEdit);
-
         JButton btnClear = new JButton("Clear");
-        btnClear.setBounds(370, 310, 100, 30);
+        btnClear.setBounds(250, 310, 100, 30);
         panel.add(btnClear);
 
         btnSearch.addActionListener(e -> {
+
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.VIEW_RECORDS);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to view patient records.");
+                return;
+            }
+
             String patientID = txtPatientId.getText().trim();
             if (patientID.isEmpty()) {
                 JOptionPane.showMessageDialog(panel, "Please enter Patient ID", "Error", JOptionPane.ERROR_MESSAGE);
@@ -557,7 +702,14 @@ public class HealthcareManagementSystemGUI extends JFrame {
             }
         });
         btnSave.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.EDIT_RECORDS);
 
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to edit patient records.");
+                return;
+            }
             currentPatient.setName(txtName.getText());
             currentPatient.setDOB((Date) dateSpinner.getValue());
             currentPatient.setGender(cbGender.getSelectedItem().toString());
@@ -575,25 +727,25 @@ public class HealthcareManagementSystemGUI extends JFrame {
     }
 
     private void createPatientManagementUI2(JPanel panel) {
-        JLabel lblSearch = new JLabel("Patient ID:");
-        lblSearch.setBounds(20, 20, 100, 25);
-        panel.add(lblSearch);
-
-        JTextField txtPatientId = new JTextField();
-        txtPatientId.setBounds(130, 20, 150, 25);
-        panel.add(txtPatientId);
-
-        JButton btnSearch = new JButton("Search");
-        btnSearch.setBounds(300, 20, 100, 25);
-        panel.add(btnSearch);
-
-        // ... Add other patient management UI components as before
-        JLabel lblName = new JLabel("Name:");
-        lblName.setBounds(440, 20, 100, 25);
-        panel.add(lblName);
-        JTextField txtName = new JTextField();
-        txtName.setBounds(500, 20, 200, 25);
-        panel.add(txtName);
+//        JLabel lblSearch = new JLabel("Patient ID:");
+//        lblSearch.setBounds(20, 20, 100, 25);
+//        panel.add(lblSearch);
+//
+//        JTextField txtPatientId = new JTextField();
+//        txtPatientId.setBounds(130, 20, 150, 25);
+//        panel.add(txtPatientId);
+//
+//        JButton btnSearch = new JButton("Search");
+//        btnSearch.setBounds(300, 20, 100, 25);
+//        panel.add(btnSearch);
+//
+//        // ... Add other patient management UI components as before
+//        JLabel lblName = new JLabel("Name:");
+//        lblName.setBounds(440, 20, 100, 25);
+//        panel.add(lblName);
+//        JTextField txtName = new JTextField();
+//        txtName.setBounds(500, 20, 200, 25);
+//        panel.add(txtName);
 
         // Replace Medical History text area with a scrollable JTable
         JLabel lblHistory = new JLabel("Medical Notes:");
@@ -737,6 +889,14 @@ public class HealthcareManagementSystemGUI extends JFrame {
         //////////btn
         btnAdd.addActionListener(e -> {
             // date for history is typically "today" (or use a separate picker if you have one)
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.TREATMENTS_AND_MEDICAL_NOTES);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to manage patient treatment and medical notes.");
+                return;
+            }
             Date date = (Date) new Date(); // reuse DOB spinner as 'note date' if acceptable
             String condition = txtCondition.getText().trim();
             String notes = txtAddress.getText().trim();
@@ -760,6 +920,15 @@ public class HealthcareManagementSystemGUI extends JFrame {
         //////////btn
         //////////btn2
         btnAdd2.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.TREATMENTS_AND_MEDICAL_NOTES);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to manage patient treatment and medical notes.");
+                return;
+            }
+
             String startStr = new java.text.SimpleDateFormat("yyyy-MM-dd").format((Date) fromDateSpinner.getValue());
             String endStr = new java.text.SimpleDateFormat("yyyy-MM-dd").format((Date) toDateSpinner.getValue());
             String desc = txtAddress2.getText().trim();
@@ -786,6 +955,16 @@ public class HealthcareManagementSystemGUI extends JFrame {
         btnAdd3.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
+
+                String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+                String roles = authService.getCurrentRole();
+                boolean allowed = isAllowedByChain(userIds, roles, Permission.TREATMENTS_AND_MEDICAL_NOTES);
+
+                if (!allowed) {
+                    JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to manage patient treatment and medical notes.");
+                    return;
+                }
+
                 String category = (String) cbCategory.getSelectedItem();
                 String medicine = (String) cbMedicine.getSelectedItem();
                 String qtyStr = txtQty.getText();
@@ -831,12 +1010,18 @@ public class HealthcareManagementSystemGUI extends JFrame {
         txtPatient.setBounds(150, 20, 200, 25);
         panel.add(txtPatient);
 
-        JLabel lblDoctor = new JLabel("Select Doctor:");
+        JLabel lblDoctor = new JLabel("Select Doctor/Staff:");
         lblDoctor.setBounds(20, 60, 120, 25);
         panel.add(lblDoctor);
-        JComboBox<String> cbDoctor = new JComboBox<>(new String[]{"Dr. Smith", "Dr. John", "Dr. Alice"});
+        cbDoctor = new JComboBox<>(new String[]{"doctor1", "doctor2", "Dr. Alice"});
         cbDoctor.setBounds(150, 60, 200, 25);
         panel.add(cbDoctor);
+
+        Set<String> allUserIds = staffRegistry.snapshot().keySet();
+        cbDoctor.removeAllItems();
+        for (String userId : allUserIds) {
+            cbDoctor.addItem(userId);
+        }
 
         JLabel lblDept = new JLabel("Department:");
         lblDept.setBounds(20, 100, 120, 25);
@@ -880,10 +1065,68 @@ public class HealthcareManagementSystemGUI extends JFrame {
             {"A001", "John Doe", "Dr. Smith", "Cardiology", "Main Hospital", "2025-08-21", "10:00"},
             {"A002", "Alice W.", "Dr. John", "Neurology", "Clinic A", "2025-08-22", "14:00"}
         };
-        JTable table = new JTable(data, columns);
+        DefaultTableModel apptModel = new DefaultTableModel(columns, 0);
+
+        JTable table = new JTable(apptModel);
         JScrollPane scrollPane = new JScrollPane(table);
         scrollPane.setBounds(20, 320, 790, 200);
         panel.add(scrollPane);
+
+        btnBook.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.MAKE_APPOINTMENT);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to to make appointments.");
+                return;
+            }
+
+            String doctor = (String) cbDoctor.getSelectedItem();
+            LocalDate apptDate = LocalDate.parse(txtDate.getText().trim());
+            LocalTime apptTime = LocalTime.parse(txtTime.getText().trim());
+
+// Check availability through mediator schedule
+            StaffSchedule schedule = mediator.getOrCreateSchedule(doctor);
+            if (!schedule.isAvailable(apptDate, apptTime)) {
+                JOptionPane.showMessageDialog(panel, "Selected Doctor is not available at " + apptDate + " " + apptTime);
+                return;
+            }
+// Prepare appointment (after collecting inputs and validating format)
+            Appointment appt = new Appointment(
+                    java.util.UUID.randomUUID().toString(),
+                    txtPatient.getText().trim(),
+                    cbDoctor.getSelectedItem().toString(),
+                    cbDept.getSelectedItem().toString(),
+                    cbFacility.getSelectedItem().toString(),
+                    LocalDate.parse(txtDate.getText().trim()),
+                    LocalTime.parse(txtTime.getText().trim())
+            );
+            boolean booked = mediator.bookAppointment(appt);
+            if (booked) {
+                apptModel.addRow(new Object[]{
+                    appt.getId(), appt.getPatient(), appt.getDoctor(), appt.getDepartment(),
+                    appt.getFacility(), appt.getDate().toString(), appt.getTime().toString()
+                });
+                JOptionPane.showMessageDialog(panel, "Appointment booked successfully.");
+            } else {
+                JOptionPane.showMessageDialog(panel, "Selected time is not available for this doctor.");
+            }
+
+        });
+        btnCancel.addActionListener(e -> {
+            int row = table.getSelectedRow();
+            if (row >= 0) {
+                String apptId = (String) apptModel.getValueAt(row, 0);
+                boolean canceled = mediator.cancelAppointment(apptId);
+                if (canceled) {
+                    apptModel.removeRow(row);
+                    JOptionPane.showMessageDialog(panel, "Appointment cancelled.");
+                } else {
+                    JOptionPane.showMessageDialog(panel, "Could not cancel appointment.");
+                }
+            }
+        });
     }
 
     private void createBillingPanel(JPanel panel) {
@@ -1001,15 +1244,42 @@ public class HealthcareManagementSystemGUI extends JFrame {
         JLabel lblTotal = new JLabel("Total: $0.00");
         lblTotal.setBounds(680, 580, 120, 25);
         panel.add(lblTotal);
+
+        btnAddService.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.BILLING_AND_PRESCRIPTION);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to billing and prescription area.");
+                return;
+            }
+
+        });
+        btnSubmitClaim.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.BILLING_AND_PRESCRIPTION);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to billing and prescription area.");
+                return;
+            }
+        });
     }
 
     private void createRolePermissionPanel(JPanel panel) {
         JLabel lblUser = new JLabel("Select User:");
         lblUser.setBounds(20, 20, 100, 25);
         panel.add(lblUser);
-        JComboBox<String> cbUser = new JComboBox<>(new String[]{"Dr. Smith", "Nurse Amy", "Admin"});
-        cbUser.setBounds(130, 20, 180, 25);
-        panel.add(cbUser);
+        cbUserIDs = new JComboBox<>();
+        Set<String> allUserIds = staffRegistry.snapshot().keySet();
+        cbUserIDs.setBounds(130, 20, 180, 25);
+        panel.add(cbUserIDs);
+        cbUserIDs.removeAllItems();
+        for (String userId : allUserIds) {
+            cbUserIDs.addItem(userId);
+        }
 
         JLabel lblRole = new JLabel("Assign Role:");
         lblRole.setBounds(350, 20, 100, 25);
@@ -1036,21 +1306,45 @@ public class HealthcareManagementSystemGUI extends JFrame {
             {"Staff Registration", true, true, true, true},
             {"Staff Schedule", true, true, true, true},
             {"Medicine Stock Management", true, true, true, true},};
-        JTable permissionTable = new JTable(data, columns) {
-            public Class getColumnClass(int column) {
-                return (column == 0) ? String.class : Boolean.class;
+        DefaultTableModel permissionTable = new DefaultTableModel(data, columns) {
+//            public Class getColumnClass(int column) {
+//                return (column == 0) ? String.class : Boolean.class;
+//            }
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                // Only role permission columns (1 to 4) are editable
+                return column > 0;
+            }
+
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                return (columnIndex == 0) ? String.class : Boolean.class;
             }
         };
-        JScrollPane scrollPane = new JScrollPane(permissionTable);
+        JTable permissionTable2 = new JTable(permissionTable);
+        JScrollPane scrollPane = new JScrollPane(permissionTable2);
         scrollPane.setBounds(20, 70, 790, 350);
         panel.add(scrollPane);
+
+        loadPermissionsToTable(permissionTable, permissionTable2);
 
         JButton btnTestPermission = new JButton("Save Selected Action");
         btnTestPermission.setBounds(20, 430, 200, 30);
         panel.add(btnTestPermission);
 
+//        JButton btnSavePermissions = new JButton("Save Permissions");
+//        btnSavePermissions.setBounds(250, 430, 150, 30);
+//        panel.add(btnSavePermissions);
         btnAssign.addActionListener(e -> {
-            String user = (String) cbUser.getSelectedItem();
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.ROLES_AND_PERMISSIONS);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to manage roles and permissions.");
+                return;
+            }
+            String user = (String) cbUserIDs.getSelectedItem();
             String role = (String) cbRole.getSelectedItem();
             if (user == null || role == null) {
                 JOptionPane.showMessageDialog(panel, "Please select user and role.", "Info", JOptionPane.INFORMATION_MESSAGE);
@@ -1059,27 +1353,63 @@ public class HealthcareManagementSystemGUI extends JFrame {
             assignedRoles.put(user, role);
             JOptionPane.showMessageDialog(panel, "Assigned role '" + role + "' to user '" + user + "'.");
         });
+//        btnTestPermission.addActionListener(e -> {
+//            int row = permissionTable.getSelectedRow();
+//            if (row < 0) {
+//                JOptionPane.showMessageDialog(panel, "Please select an action row in the table.");
+//                return;
+//            }
+//
+//            String actionName = permissionTable.getValueAt(row, 0).toString(); // first column is action string
+//            Permission permission = mapActionToPermission(actionName);
+//            if (permission == null) {
+//                JOptionPane.showMessageDialog(panel, "This action is not mapped to a permission in code.");
+//                return;
+//            }
+//
+//            String user = (String) cbUserIDs.getSelectedItem();
+//            // If you want to use the assigned role, prefer that; otherwise use current selection from cbRole.
+//            String role = assignedRoles.getOrDefault(user, (String) cbRole.getSelectedItem());
+//
+//            boolean allowed = isAllowedByChain(user, role, permission);
+//            JOptionPane.showMessageDialog(panel,
+//                    (allowed ? "ALLOWED" : "DENIED") + " for user=" + user + ", role=" + role + ", action=" + actionName);
+//        });
         btnTestPermission.addActionListener(e -> {
-            int row = permissionTable.getSelectedRow();
-            if (row < 0) {
-                JOptionPane.showMessageDialog(panel, "Please select an action row in the table.");
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roless = authService.getCurrentRole();
+            boolean alloweds = isAllowedByChain(userIds, roless, Permission.BILLING_AND_PRESCRIPTION);
+
+            if (!alloweds) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to billing and prescription area.");
                 return;
             }
+            String[] roles = {"Doctor", "Nurse", "Pharmacist", "Admin"};
+            // We'll rebuild the sets based on table checkbox states
+            Map<String, EnumSet<Permission>> newPermissions = new HashMap<>();
 
-            String actionName = permissionTable.getValueAt(row, 0).toString(); // first column is action string
-            Permission permission = mapActionToPermission(actionName);
-            if (permission == null) {
-                JOptionPane.showMessageDialog(panel, "This action is not mapped to a permission in code.");
-                return;
+            for (int col = 1; col <= roles.length; col++) { // columns 1 to 4 (roles)
+                EnumSet<Permission> perms = EnumSet.noneOf(Permission.class);
+                String role = roles[col - 1];
+                for (int row = 0; row < permissionTable.getRowCount(); row++) {
+                    Boolean allowed = (Boolean) permissionTable.getValueAt(row, col);
+                    if (allowed != null && allowed) {
+                        String actionName = (String) permissionTable.getValueAt(row, 0);
+                        Permission perm = mapActionToPermission(actionName);
+                        if (perm != null) {
+                            perms.add(perm);
+                        }
+                    }
+                }
+                newPermissions.put(role, perms);
             }
 
-            String user = (String) cbUser.getSelectedItem();
-            // If you want to use the assigned role, prefer that; otherwise use current selection from cbRole.
-            String role = assignedRoles.getOrDefault(user, (String) cbRole.getSelectedItem());
+            // Update your in-memory PermissionMatrix (assumed imported)
+            for (Map.Entry<String, EnumSet<Permission>> entry : newPermissions.entrySet()) {
+                PermissionMatrix.setPermissionsForRole(entry.getKey(), entry.getValue());
+            }
 
-            boolean allowed = isAllowedByChain(user, role, permission);
-            JOptionPane.showMessageDialog(panel,
-                    (allowed ? "ALLOWED" : "DENIED") + " for user=" + user + ", role=" + role + ", action=" + actionName);
+            JOptionPane.showMessageDialog(panel, "Permissions updated in memory for roles successfully.");
         });
     }
 
@@ -1121,55 +1451,129 @@ public class HealthcareManagementSystemGUI extends JFrame {
         JScrollPane scrollPane = new JScrollPane(reportArea);
         scrollPane.setBounds(20, 150, 790, 350);
         panel.add(scrollPane);
+
+        btnGenerateReport.addActionListener(e -> {
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.GENERATE_REPORTS);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to generate reports.");
+                return;
+            }
+        });
+    }
+
+    private void signOutPanel(JPanel panel) {
+
+        JButton btnSignOut = new JButton("Sign Out");
+        btnSignOut.setBounds(400, 50, 150, 25);
+        panel.add(btnSignOut);
+
+        btnSignOut.addActionListener(e -> {
+
+            logoutAndReLogin();
+
+        });
+    }
+
+    private void logoutAndReLogin() {
+        authService.logout();
+        JOptionPane.showMessageDialog(this, "Signed out.");
+        showLoginDialog();
+    }
+
+    private void showLoginDialog() {
+        JTextField txtUser = new JTextField();
+        JPasswordField txtPass = new JPasswordField();
+
+        Object[] message = {
+            "User ID:", txtUser,
+            "Password:", txtPass
+        };
+
+        int option = JOptionPane.showConfirmDialog(this, message, "Login", JOptionPane.OK_CANCEL_OPTION);
+        if (option == JOptionPane.OK_OPTION) {
+            String user = txtUser.getText().trim();
+            String pass = new String(txtPass.getPassword());
+
+            Request req = new Request(user, "LoginAttempt");
+
+            // Use your security chain for access check and logging attempts
+            if (securityChain == null || !securityChain.handle(req)) {
+                JOptionPane.showMessageDialog(this, "Access denied by security checks.");
+                showLoginDialog(); // retry
+                return;
+            }
+
+            boolean ok = authService.login(user, pass);
+            if (!ok) {
+                JOptionPane.showMessageDialog(this, "Invalid credentials.");
+                showLoginDialog(); // try again
+            } else {
+                JOptionPane.showMessageDialog(this, "Welcome, " + authService.getCurrentUserId() + " (" + authService.getCurrentRole() + ")");
+                // Optionally enable tabs based on role, or just keep permission checks on actions
+//                HealthcareManagementSystemGUI h = new HealthcareManagementSystemGUI();
+//                h.setVisible(true);
+//                this.dispose();
+
+            }
+        } else {
+            System.exit(0); // no login -> exit
+        }
     }
 
     private void createStaffSchedulePanel(JPanel panel) {
         JLabel lblUser = new JLabel("Select User:");
-        lblUser.setBounds(350, 20, 100, 25);
+        lblUser.setBounds(20, 20, 100, 25);
 //        lblUser.setBounds(20, 20, 100, 25);
         panel.add(lblUser);
-        JComboBox<String> cbUser = new JComboBox<>(new String[]{"Dr. Smith", "Nurse Amy", "Admin"});
-        cbUser.setBounds(450, 20, 180, 25);
+        cbUserss = new JComboBox<>();
+        cbUserss.setBounds(130, 20, 180, 25);
 //        cbUser.setBounds(130, 20, 180, 25);
-        panel.add(cbUser);
+        panel.add(cbUserss);
 
-        JLabel lblRole = new JLabel("Assign Role:");
-        lblRole.setBounds(20, 20, 100, 25);
-//        lblRole.setBounds(350, 20, 100, 25);
-        panel.add(lblRole);
-        JComboBox<String> cbRole = new JComboBox<>(new String[]{"Doctor", "Nurse", "Pharmacist", "Admin"});
-        cbRole.setBounds(130, 20, 180, 25);
-//        cbRole.setBounds(450, 20, 180, 25);
-        panel.add(cbRole);
+        Set<String> allUserIds = staffRegistry.snapshot().keySet();
+        cbUserss.removeAllItems();
+        for (String userId : allUserIds) {
+            cbUserss.addItem(userId);
+        }
 
+//        JLabel lblRole = new JLabel("Assign Role:");
+//        lblRole.setBounds(20, 20, 100, 25);
+////        lblRole.setBounds(350, 20, 100, 25);
+//        panel.add(lblRole);
+//        cbRolell = new JComboBox<>(new String[]{"Doctor", "Nurse", "Pharmacist", "Admin"});
+//        cbRolell.setBounds(130, 20, 180, 25);
+////        cbRole.setBounds(450, 20, 180, 25);
+//        panel.add(cbRolell);
 //        JButton btnAssign = new JButton("Assign Role");
 //        btnAssign.setBounds(650, 20, 120, 25);
 //        panel.add(btnAssign);
-        Map<String, String[]> usersByRole = new HashMap<>();
-        usersByRole.put("Doctor", new String[]{"Dr. Smith", "Dr. Brown", "Dr. Johnson"});
-        usersByRole.put("Nurse", new String[]{"Nurse Amy", "Nurse Bob"});
-        usersByRole.put("Pharmacist", new String[]{"Pharmacist Joe", "Pharmacist Ann"});
-        usersByRole.put("Admin", new String[]{"Admin Mike", "Admin Jill"});
-
+//        usersByRolell = new HashMap<>();
+//        usersByRolell.put("Doctor", getUsersByRole("Doctor"));
+//        usersByRolell.put("Nurse", getUsersByRole("Nurse"));
+//        usersByRolell.put("Pharmacist", getUsersByRole("Pharmacist"));
+//        usersByRolell.put("Admin", getUsersByRole("Admin"));
 // Populate user combo box based on initial role selected
-        String selectedRole = (String) cbRole.getSelectedItem();
-        if (selectedRole != null) {
-            cbUser.setModel(new DefaultComboBoxModel<>(usersByRole.get(selectedRole)));
-        }
-
+//        String selectedRole = (String) cbRolell.getSelectedItem();
+//        updateUserComboBoxByRole(selectedRole);
+//        String selectedRole = "Doctor";
+//        cbUserss.setModel(new DefaultComboBoxModel<>(usersByRolell.getOrDefault(selectedRole, new String[]{})));
 // Add listener to role combo box to update users combo box whenever role changes
-        cbRole.addActionListener(e -> {
-            String role = (String) cbRole.getSelectedItem();
-            if (role != null) {
-                String[] users = usersByRole.get(role);
-                if (users != null) {
-                    cbUser.setModel(new DefaultComboBoxModel<>(users));
-                } else {
-                    cbUser.setModel(new DefaultComboBoxModel<>(new String[]{}));
-                }
-            }
-        });
-
+//        cbRolell.addActionListener(e -> {
+//            String role = (String) cbRolell.getSelectedItem();
+////            if (role != null) {
+////                String[] users = usersByRole.get(role);
+////                if (users != null) {
+////                    cbUser.setModel(new DefaultComboBoxModel<>(users));
+////                } else {
+////                    cbUser.setModel(new DefaultComboBoxModel<>(new String[]{}));
+////                }
+////            }
+////            cbUser.setModel(new DefaultComboBoxModel<>(usersByRole.getOrDefault(role, new String[]{})));
+//            updateUserComboBoxByRole(role);
+//        });
         ///////////////////////////////////////////////////////////
         // --- Date Picker ---
         JLabel lblDate = new JLabel("Select Date:");
@@ -1214,6 +1618,17 @@ public class HealthcareManagementSystemGUI extends JFrame {
         panel.add(lblResult);
 
         btnSave.addActionListener(e -> {
+            String user = (String) cbUserss.getSelectedItem();
+//            String role = (String) cbRolell.getSelectedItem();
+
+            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String roles = authService.getCurrentRole();
+            boolean allowed = isAllowedByChain(userIds, roles, Permission.STAFF_SCHEDULE);
+
+            if (!allowed) {
+                JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to schedule staff.");
+                return;
+            }
             Date selectedDate = (Date) dateSpinner.getValue();
             Date startTime = (Date) startSpinner.getValue();
             Date endTime = (Date) endSpinner.getValue();
@@ -1223,11 +1638,19 @@ public class HealthcareManagementSystemGUI extends JFrame {
             LocalTime start = startTime.toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
             LocalTime end = endTime.toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
 
-            lblResult.setText("Date: " + date + ", From: " + start + " To: " + end);
+            StaffSchedule schedule = mediator.getOrCreateSchedule(user);
+            schedule.addAvailableSlot(date, start, end);
+
+            lblResult.setText("Availability saved for " + user + " on " + date + " from " + start + " to " + end);
         });
 //            panel.setVisible(true);
         ///////////////////////////////////////////////////////////
 
+    }
+
+    private void updateUserComboBoxByRole(String role) {
+        String[] users = usersByRolell.getOrDefault(role, new String[]{});
+        cbUserss.setModel(new DefaultComboBoxModel<>(users));
     }
 
     private Permission mapActionToPermission(String actionName) {
@@ -1273,6 +1696,33 @@ public class HealthcareManagementSystemGUI extends JFrame {
 
         AccessRequest req = new AccessRequest(userId, selectedRole, permission);
         return chain.handle(req);
+    }
+
+    private void loadPermissionsToTable(DefaultTableModel model, JTable table) {
+        String[] roles = {"Doctor", "Nurse", "Pharmacist", "Admin"};
+        model.setRowCount(0); // clear existing data
+
+        // Define all actions (rows) corresponding to your Permission enum / mapActionToPermission
+        String[] actions = {"View Records", "Edit Records", "Reports", "Billing and prescriptions", "Register Patient", "Treatment and Medical Notes", "Make Appointment", "Roles and Permissions", "Staff Registration", "Staff Schedule", "Medicine Stock Management"};
+
+        for (String action : actions) {
+            Object[] row = new Object[roles.length + 1];
+            row[0] = action;
+            for (int i = 0; i < roles.length; i++) {
+                EnumSet<Permission> perms = PermissionMatrix.getPermissionsForRole(roles[i]);
+                Permission perm = mapActionToPermission(action);
+                row[i + 1] = perm != null && perms.contains(perm);
+            }
+            model.addRow(row);
+        }
+    }
+
+    private String[] getUsersByRole(String role) {
+        // Example: filtering assignedRoles map that stores userId->role from Part D
+        return assignedRoles.entrySet().stream()
+                .filter(entry -> role.equalsIgnoreCase(entry.getValue()))
+                .map(Map.Entry::getKey)
+                .toArray(String[]::new);
     }
 
     /**
