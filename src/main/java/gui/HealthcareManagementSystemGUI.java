@@ -3,6 +3,7 @@ package gui;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import java.awt.BorderLayout;
+import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.geom.FlatteningPathIterator;
@@ -45,6 +46,7 @@ import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import javax.swing.BorderFactory;
 import javax.swing.JPasswordField;
 import javax.swing.UIManager;
 import model.Medicine;
@@ -55,6 +57,7 @@ import model.partC.BillingAbstraction;
 import model.partC.BillingEngineSelector;
 import model.partC.BillingLine;
 import model.partC.BillingSummary;
+import model.partC.BillingSummaryStore;
 import model.partC.PatientServiceLinesStore;
 import model.partD.AccessControlChainBuilder;
 import model.partD.AccessRequest;
@@ -64,6 +67,11 @@ import model.partD.staff.AuthService;
 import model.partD.staff.PermissionMatrix;
 import model.partD.staff.SessionManager;
 import model.partD.staff.StaffRegistry;
+import model.partE.DiagnosticReportVisitor;
+import model.partE.FinancialReportVisitor;
+import model.partE.PatientElement;
+import model.partE.TreatmentSummaryVisitor;
+import model.partE.Visitor;
 import model.partF.DataService;
 import model.partF.EncryptionDecorator;
 import model.partF.LoggingDecorator;
@@ -103,6 +111,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
     private Handler securityChain;
     private List<Medicine> medicineList = new ArrayList<>();
     JTextField txtPatientId;
+    private List<Patient> patients = new ArrayList<>();
 
     public HealthcareManagementSystemGUI() {
         initializeDataServices();
@@ -1177,7 +1186,6 @@ public class HealthcareManagementSystemGUI extends JFrame {
 //        JScrollPane scrollPane1 = new JScrollPane(table);
 //        scrollPane1.setBounds(20, 60, 540, 150);
 //        panel.add(scrollPane1);
-
         JLabel lblServiceCode = new JLabel("Main Service:");
         lblServiceCode.setBounds(20, 260, 100, 25);
         panel.add(lblServiceCode);
@@ -1359,8 +1367,10 @@ public class HealthcareManagementSystemGUI extends JFrame {
                     + "\nInsurer pays: " + summary.getInsurerPays()
                     + (summary.getClaimReference() != null ? ("\nClaim Ref: " + summary.getClaimReference()) : "")
                     + (summary.getNote() != null ? ("\nNote: " + summary.getNote()) : "")
-                   + "\nDate: " + new Date().toString()
+                    + "\nDate: " + new Date().toString()
             );
+            BillingSummaryStore.saveBillingSummary(pid, summary, new Date());
+
         });
     }
 
@@ -1560,7 +1570,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
         panel.add(scrollPane);
 
         btnGenerateReport.addActionListener(e -> {
-            String userIds = authService.getCurrentUserId();  // Current logged-in user ID
+            String userIds = authService.getCurrentUserId();
             String roles = authService.getCurrentRole();
             boolean allowed = isAllowedByChain(userIds, roles, Permission.GENERATE_REPORTS);
 
@@ -1568,7 +1578,55 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to generate reports.");
                 return;
             }
+
+            String patientIdStr = txtPatientId.getText().trim();
+            if (patientIdStr.isEmpty()) {
+                JOptionPane.showMessageDialog(panel, "Please enter Patient ID.");
+                return;
+            }
+
+            Date fromDate, toDate;
+            try {
+                fromDate = new SimpleDateFormat("yyyy-MM-dd").parse(txtFromDate.getText().trim());
+                toDate = new SimpleDateFormat("yyyy-MM-dd").parse(txtToDate.getText().trim());
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(panel, "Please enter valid From and To dates in yyyy-MM-dd format.");
+                return;
+            }
+            String reportType = (String) cbReportType.getSelectedItem();
+
+            // Obtain patient from your DB or in-memory store
+//            Patient patient = loadPatientById(Integer.parseInt(patientIdStr));
+            PatientMemento memento = caretaker.getState(patientIdStr);
+
+          
+            if (memento == null) {
+                JOptionPane.showMessageDialog(panel, "Patient not found.");
+                return;
+            }
+            currentPatient.restoreFromMemento(memento);
+            Visitor visitor = null;
+            switch (reportType) {
+                case "Treatment Summary":
+                    visitor = new TreatmentSummaryVisitor();
+                    break;
+                case "Diagnostic":
+                    visitor = new DiagnosticReportVisitor();
+                    break;
+                case "Financial":
+                    visitor = new FinancialReportVisitor(fromDate, toDate);
+                    break;
+            }
+
+            if (visitor != null) {
+                PatientElement patientElem = new PatientElement(currentPatient);
+                patientElem.accept(visitor);
+
+                // Preview report with print button
+                openReportPreview(reportType, visitor.getReport());
+            }
         });
+
     }
 
     private void signOutPanel(JPanel panel) {
@@ -1830,6 +1888,51 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 .filter(entry -> role.equalsIgnoreCase(entry.getValue()))
                 .map(Map.Entry::getKey)
                 .toArray(String[]::new);
+    }
+    // Method to open a report preview window for given report text and title
+
+    private void openReportPreview(String reportTitle, String reportText) {
+        JFrame reportFrame = new JFrame(reportTitle);
+        reportFrame.setSize(600, 500);
+        reportFrame.setLocationRelativeTo(this);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        
+        JTextArea reportArea = new JTextArea(reportText);
+        reportArea.setEditable(false);
+        reportArea.setFont(new Font("monospaced", Font.PLAIN, 14));
+        JScrollPane scrollPane = new JScrollPane(reportArea);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        JButton btnPrint = new JButton("Print");
+        panel.add(btnPrint, BorderLayout.SOUTH);
+
+        btnPrint.addActionListener(e -> {
+            try {
+                boolean done = reportArea.print();
+                if (done) {
+                    JOptionPane.showMessageDialog(reportFrame, "Printing complete", "Print", JOptionPane.INFORMATION_MESSAGE);
+                } else {
+                    JOptionPane.showMessageDialog(reportFrame, "Printing cancelled", "Print", JOptionPane.WARNING_MESSAGE);
+                }
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(reportFrame, "Error printing: " + ex.getMessage(), "Print", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        reportFrame.setContentPane(panel);
+        reportFrame.setVisible(true);
+    }
+
+    private Patient loadPatientById(int patientId) {
+        for (Patient p : patients) {
+            if (p.getId() == patientId) {
+                return p;
+            }
+        }
+        return null; // not found
     }
 
     /**
