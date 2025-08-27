@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
 import java.util.HashMap;
 import java.util.Map;
@@ -37,6 +38,7 @@ import model.partA.PatientMemento;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
@@ -45,9 +47,15 @@ import java.util.List;
 import java.util.Set;
 import javax.swing.JPasswordField;
 import javax.swing.UIManager;
+import model.Medicine;
 import model.partB.Appointment;
 import model.partB.AppointmentMediator;
 import model.partB.StaffSchedule;
+import model.partC.BillingAbstraction;
+import model.partC.BillingEngineSelector;
+import model.partC.BillingLine;
+import model.partC.BillingSummary;
+import model.partC.PatientServiceLinesStore;
 import model.partD.AccessControlChainBuilder;
 import model.partD.AccessRequest;
 import model.partD.Permission;
@@ -65,6 +73,7 @@ import model.partF.chainOfRes.AuthorizationHandler;
 import model.partF.chainOfRes.Handler;
 import model.partF.chainOfRes.LoggingHandler;
 import model.partF.chainOfRes.Request;
+import net.sf.jasperreports.engine.JasperReport;
 
 /**
  *
@@ -92,6 +101,8 @@ public class HealthcareManagementSystemGUI extends JFrame {
     Map<String, String[]> usersByRolell;
     private DataService patientDataService;
     private Handler securityChain;
+    private List<Medicine> medicineList = new ArrayList<>();
+    JTextField txtPatientId;
 
     public HealthcareManagementSystemGUI() {
         initializeDataServices();
@@ -445,6 +456,10 @@ public class HealthcareManagementSystemGUI extends JFrame {
         });
     }
 
+    public List<Medicine> getMedicines() {
+        return new ArrayList<>(medicineList); // return a copy to prevent external modification
+    }
+
     private void createMedicineStockManagement(JPanel panel) {
         JLabel lblName = new JLabel("Drug Name:");
         lblName.setBounds(20, 20, 100, 25);
@@ -522,6 +537,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
             String name = txtName.getText().trim();
             String qty = txtQY.getText().trim();
             String price = txtPU.getText().trim();
+            String supplier = txtSUP.getText().trim();
 
             double price2 = Double.parseDouble(txtPU.getText().trim());
             int qty2 = Integer.parseInt(txtQY.getText().trim());
@@ -530,7 +546,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
             // Set total into txtAM
             txtAM.setText(String.valueOf(total2));
 
-            if (name.isEmpty() || qty.isEmpty() || price.isEmpty()) {
+            if (name.isEmpty() || qty.isEmpty() || price.isEmpty() || supplier.isEmpty()) {
                 JOptionPane.showMessageDialog(panel, "Please fill all required fields!", "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
@@ -540,7 +556,8 @@ public class HealthcareManagementSystemGUI extends JFrame {
 
             // Add row to table
             tableModel.addRow(new Object[]{drugId, name, price, qty});
-
+            Medicine newMedicine = new Medicine(drugId, name, price2, qty2, supplier);
+            medicineList.add(newMedicine);
             JOptionPane.showMessageDialog(panel, "Drug added successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
         });
 
@@ -558,7 +575,7 @@ public class HealthcareManagementSystemGUI extends JFrame {
         lblSearch.setBounds(20, 20, 100, 25);
         panel.add(lblSearch);
 
-        JTextField txtPatientId = new JTextField();
+        txtPatientId = new JTextField();
         txtPatientId.setBounds(130, 20, 150, 25);
         panel.add(txtPatientId);
 
@@ -968,12 +985,25 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 String category = (String) cbCategory.getSelectedItem();
                 String medicine = (String) cbMedicine.getSelectedItem();
                 String qtyStr = txtQty.getText();
+                int qty2 = qtyStr.isEmpty() ? 0 : Integer.parseInt(qtyStr);
 
+                String mainService = "Medications"; // since this panel explicitly handles Medication/Surgeries/Diagnostics
+                String desc = medicine;
                 if (medicine == null || medicine.isEmpty()) {
                     JOptionPane.showMessageDialog(null, "Please select a name.");
                     return;
                 }
+                if (category != null && !category.isBlank()) {
+                    desc = medicine + " (" + category + ")";
+                }
 
+// You may not know unit price here; use 0 and allow billing to edit later
+                java.math.BigDecimal unitPrice = java.math.BigDecimal.ZERO;
+                String patientId = txtPatientId.getText();
+                /* get the patient id for this panel context */
+
+                PatientServiceLinesStore.add(patientId, mainService, desc, qty2, unitPrice);
+                tableModel3.addRow(new Object[]{category, medicine, qty2});
                 try {
                     int qty;
                     if (qtyStr.isEmpty()) {
@@ -1133,20 +1163,20 @@ public class HealthcareManagementSystemGUI extends JFrame {
         JLabel lblPatient = new JLabel("Patient ID:");
         lblPatient.setBounds(20, 20, 100, 25);
         panel.add(lblPatient);
-        JTextField txtPatientId = new JTextField();
-        txtPatientId.setBounds(130, 20, 180, 25);
-        panel.add(txtPatientId);
+        JTextField txtPatientId2 = new JTextField();
+        txtPatientId2.setBounds(130, 20, 180, 25);
+        panel.add(txtPatientId2);
 
         JButton btnPsearch = new JButton("Search");
         btnPsearch.setBounds(340, 20, 120, 25);
         panel.add(btnPsearch);
 
-        String[] columnsn = {"Service", "Name", "Quantity"};
-        DefaultTableModel tableModel3 = new DefaultTableModel(columnsn, 0);
-        JTable table = new JTable(tableModel3);
-        JScrollPane scrollPane1 = new JScrollPane(table);
-        scrollPane1.setBounds(20, 60, 540, 150);
-        panel.add(scrollPane1);
+//        String[] columnsn = {"Service", "Name", "Quantity"};
+//        DefaultTableModel tableModel3 = new DefaultTableModel(columnsn, 0);
+//        JTable table = new JTable(tableModel3);
+//        JScrollPane scrollPane1 = new JScrollPane(table);
+//        scrollPane1.setBounds(20, 60, 540, 150);
+//        panel.add(scrollPane1);
 
         JLabel lblServiceCode = new JLabel("Main Service:");
         lblServiceCode.setBounds(20, 260, 100, 25);
@@ -1160,10 +1190,10 @@ public class HealthcareManagementSystemGUI extends JFrame {
 //        txtServiceCode.setBounds(130, 60, 180, 25);
 //        panel.add(txtServiceCode);
         JLabel lblQuantity = new JLabel("Quantity:");
-        lblQuantity.setBounds(350, 260, 80, 25);
+        lblQuantity.setBounds(760, 260, 80, 25);
         panel.add(lblQuantity);
         JTextField txtQuantity = new JTextField();
-        txtQuantity.setBounds(430, 260, 100, 25);
+        txtQuantity.setBounds(820, 260, 100, 25);
         panel.add(txtQuantity);
 
         JLabel lblUnitPrice = new JLabel("Unit Price:");
@@ -1175,55 +1205,42 @@ public class HealthcareManagementSystemGUI extends JFrame {
 
         //////////////////
         JLabel lblCategory = new JLabel("Service:");
-        lblCategory.setBounds(760, 260, 70, 25);
+        lblCategory.setBounds(350, 260, 70, 25);
+        lblCategory.setVisible(false);
         panel.add(lblCategory);
 
-        JComboBox<String> cbCategory = new JComboBox<>(new String[]{"Medication", "Surgeries", "Diagnostics"});
-        cbCategory.setBounds(820, 260, 150, 25);
+        JComboBox<String> cbCategory = new JComboBox<>(new String[]{"Surgeries", "Diagnostics"});
+        cbCategory.setBounds(410, 260, 130, 25);
+        cbCategory.setVisible(false);
         panel.add(cbCategory);
 
-        // Combo Box 2 - Medicine Names (initially for Medication category)
-        JLabel lblMedicine = new JLabel("Medicine Name:");
-        lblMedicine.setBounds(380, 310, 100, 25);
-        panel.add(lblMedicine);
+        cbService.addActionListener(e -> {
+            String selected = (String) cbService.getSelectedItem();
+            boolean show = "Medications".equals(selected);
+            lblCategory.setVisible(show);
+            cbCategory.setVisible(show);
 
-        JComboBox<String> cbMedicine = new JComboBox<>();
-        cbMedicine.setBounds(500, 310, 150, 25);
-        panel.add(cbMedicine);
-
-        // Populate medicine names for Medication by default
-        String[] medications = {"Paracetamol", "Aspirin", "Ibuprofen"};
-        String[] surgeries = {"Appendectomy", "Gallbladder Removal"};
-        String[] diagnostics = {"Blood Test", "X-Ray"};
-
-        // Function to update medicine combo based on category selection
-        cbCategory.addActionListener(e -> {
-            String selected = (String) cbCategory.getSelectedItem();
-            cbMedicine.removeAllItems();
-            String[] items = {};
-            if ("Medication".equals(selected)) {
-                items = medications;
-            } else if ("Surgeries".equals(selected)) {
-                items = surgeries;
-            } else if ("Diagnostics".equals(selected)) {
-                items = diagnostics;
-            }
-
-            for (String item : items) {
-                cbMedicine.addItem(item);
-            }
+            // Refresh panel to update UI
+            panel.revalidate();
+            panel.repaint();
         });
 
-        // Trigger initial population
-        cbCategory.setSelectedIndex(0);
-        /////////////////
+        // Combo Box 2 - Medicine Names (initially for Medication category)
+        JLabel lblMedicine = new JLabel("Description :");
+        lblMedicine.setBounds(20, 310, 100, 25);
+        panel.add(lblMedicine);
 
+        JTextField txtDescription = new JTextField();
+        txtDescription.setBounds(150, 310, 160, 25);
+        panel.add(txtDescription);
+
+        /////////////////
         JLabel lblInsurance = new JLabel("Insurance Provider:");
-        lblInsurance.setBounds(20, 310, 130, 25);
+        lblInsurance.setBounds(380, 310, 130, 25);
         panel.add(lblInsurance);
-        JComboBox<String> cbInsurance = new JComboBox<>(new String[]{"None", "Provider A", "Provider B"});
-        cbInsurance.setBounds(150, 310, 200, 25);
-        panel.add(cbInsurance);
+        JTextField txtInsurance = new JTextField();
+        txtInsurance.setBounds(500, 310, 120, 25);
+        panel.add(txtInsurance);
 
         JButton btnAddService = new JButton("Add Service");
         btnAddService.setBounds(670, 310, 120, 25);
@@ -1234,16 +1251,35 @@ public class HealthcareManagementSystemGUI extends JFrame {
         panel.add(btnSubmitClaim);
 
         // Billing table
-        String[] columns = {"Service Code", "Description", "Quantity", "Unit Price", "Total"};
+        String[] columns = {"Main Service ", "Description", "Quantity", "Unit Price", "Total"};
         Object[][] data = {}; // Initially empty
-        JTable billingTable = new JTable(new Object[0][11], columns);
+//        JTable billingTable = new JTable(new Object[0][11], columns);
+        DefaultTableModel billingModel = new DefaultTableModel(columns, 0); // 0 rows initially
+        JTable billingTable = new JTable(billingModel);
         JScrollPane scrollPane = new JScrollPane(billingTable);
-        scrollPane.setBounds(20, 350, 790, 200);
+        scrollPane.setBounds(20, 60, 790, 170);
         panel.add(scrollPane);
 
         JLabel lblTotal = new JLabel("Total: $0.00");
         lblTotal.setBounds(680, 580, 120, 25);
         panel.add(lblTotal);
+
+        btnPsearch.addActionListener(e -> {
+            String pid = txtPatientId2.getText().trim();
+            if (pid.isEmpty()) {
+                JOptionPane.showMessageDialog(panel, "Enter Patient ID.");
+                return;
+            }
+            DefaultTableModel model = (DefaultTableModel) billingTable.getModel();
+            model.setRowCount(0);
+            List<BillingLine> lines = PatientServiceLinesStore.find(pid);
+            BigDecimal sum = BigDecimal.ZERO;
+            for (BillingLine l : lines) {
+                model.addRow(new Object[]{l.getMainService(), l.getDescription(), l.getQuantity(), l.getUnitPrice(), l.getLineTotal()});
+                sum = sum.add(l.getLineTotal());
+            }
+            lblTotal.setText("Total: $" + sum);
+        });
 
         btnAddService.addActionListener(e -> {
             String userIds = authService.getCurrentUserId();  // Current logged-in user ID
@@ -1254,7 +1290,42 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to billing and prescription area.");
                 return;
             }
+            String pid = txtPatientId.getText().trim();
+            if (pid.isEmpty()) {
+                JOptionPane.showMessageDialog(panel, "Enter Patient ID first.");
+                return;
+            }
 
+            String mainService = (String) cbService.getSelectedItem();              // Consultations | Treatments | Medications
+            String description = txtDescription.getText().trim();
+
+            if ("Medications".equals(mainService) && cbCategory.isVisible()) {
+                String cat = (String) cbCategory.getSelectedItem();                 // Surgeries/Diagnostics when visible (per your toggle)
+                if (cat != null && !cat.isBlank()) {
+                    description = description.isBlank() ? cat : description + " (" + cat + ")";
+                }
+            }
+
+            int qty;
+            java.math.BigDecimal unitPrice;
+            try {
+                qty = Integer.parseInt(txtQuantity.getText().trim());
+                unitPrice = new java.math.BigDecimal(txtUnitPrice.getText().trim());
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(panel, "Quantity and Unit Price must be numeric.");
+                return;
+            }
+
+            // UI table add
+            DefaultTableModel model = (javax.swing.table.DefaultTableModel) billingTable.getModel();
+            BigDecimal total = unitPrice.multiply(java.math.BigDecimal.valueOf(qty));
+            model.addRow(new Object[]{mainService, description, qty, unitPrice, total});
+
+            // Persist for this patient
+            PatientServiceLinesStore.add(pid, mainService, description, qty, unitPrice);
+
+            // Update label
+            updateBillingTotalFromTable((DefaultTableModel) billingTable.getModel(), lblTotal);
         });
         btnSubmitClaim.addActionListener(e -> {
             String userIds = authService.getCurrentUserId();  // Current logged-in user ID
@@ -1265,7 +1336,43 @@ public class HealthcareManagementSystemGUI extends JFrame {
                 JOptionPane.showMessageDialog(panel, "Access denied: You don't have permission to billing and prescription area.");
                 return;
             }
+            String pid = txtPatientId.getText().trim();
+            String insurer = txtInsurance.getText().trim(); // empty = direct
+
+            // Build a fresh billing session (Bridge abstraction)
+            BillingAbstraction session = BillingEngineSelector.newSession(pid, insurer);
+
+            DefaultTableModel model = (DefaultTableModel) billingTable.getModel();
+            for (int r = 0; r < model.getRowCount(); r++) {
+                String mainService = String.valueOf(model.getValueAt(r, 0));
+                String desc = String.valueOf(model.getValueAt(r, 1));
+                int qty = Integer.parseInt(String.valueOf(model.getValueAt(r, 2)));
+                java.math.BigDecimal unit = new java.math.BigDecimal(String.valueOf(model.getValueAt(r, 3)));
+                session.addLine(new BillingLine(mainService, desc, qty, unit));
+            }
+
+            BillingSummary summary = session.submit();
+
+            javax.swing.JOptionPane.showMessageDialog(panel,
+                    "Subtotal: " + summary.getSubTotal()
+                    + "\nPatient pays: " + summary.getPatientPays()
+                    + "\nInsurer pays: " + summary.getInsurerPays()
+                    + (summary.getClaimReference() != null ? ("\nClaim Ref: " + summary.getClaimReference()) : "")
+                    + (summary.getNote() != null ? ("\nNote: " + summary.getNote()) : "")
+                   + "\nDate: " + new Date().toString()
+            );
         });
+    }
+
+    private void updateBillingTotalFromTable(DefaultTableModel model, JLabel lblTotal) {
+        BigDecimal sum = java.math.BigDecimal.ZERO;
+        for (int r = 0; r < model.getRowCount(); r++) {
+            Object v = model.getValueAt(r, 4);
+            if (v != null) {
+                sum = sum.add(new java.math.BigDecimal(String.valueOf(v)));
+            }
+        }
+        lblTotal.setText("Total: $" + sum);
     }
 
     private void createRolePermissionPanel(JPanel panel) {
